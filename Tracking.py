@@ -17,7 +17,7 @@ from   numpy import matrix
 class Line():
     def __init__(self,mtx,dist):
         # was the line detected in the last iteration?
-        self.detected = False  
+        self.detected = True  
         # x values of the last n fits of the line
         self.recent_xfitted_left = [] 
         self.recent_xfitted_right = [] 
@@ -63,7 +63,7 @@ class Line():
         if  np.shape(self.current_fit_left)[0] >= 2:
             self.diffs = np.sum(np.abs(self.current_fit_left[-1] - self.current_fit_left[-2]) + \
                      np.abs(self.current_fit_right[-1] - self.current_fit_right[-2]))
-        if (parall < 5500 and (distance > 3.3 and distance < 4.5)) :
+        if (parall < 8500 and (distance > 3.2 and distance < 4.5)) :
             self.detected = True
             self.__n.append(0)
         else:
@@ -82,7 +82,7 @@ class Line():
     # average the last n frame image to improve robust 
     def smoothing(self):
         # the number of frame used  
-        backon = 5
+        backon = 8
         if len(self.__n) < backon:
             num = len(self.__n) - sum(self.__n)
         else:
@@ -101,6 +101,8 @@ class Line():
             aver_x_left = []
             aver_y_right = []
             aver_x_right = []
+            average_fit_left = []
+            average_fit_right =[]
 
             for index in range(num):
                 aver_y_left.extend((self.ally_left[-1-index].T)[0])
@@ -108,15 +110,19 @@ class Line():
                
                 aver_y_right.extend((self.ally_right[-1-index].T)[0])
                 aver_x_right.extend((self.allx_right[-1-index].T)[0])
-   
+                
+                average_fit_left.append((self.current_fit_left[-1-index].T)[0])
+                average_fit_right.append((self.current_fit_right[-1-index].T)[0])
             
-            left_fit = np.polyfit(np.array(aver_y_left), np.array(aver_x_left), 2)           
-            right_fit = np.polyfit(np.array(aver_y_right), np.array(aver_x_right), 2)
+            #left_fit = np.polyfit(np.array(aver_y_left), np.array(aver_x_left), 2)           
+            #right_fit = np.polyfit(np.array(aver_y_right), np.array(aver_x_right), 2)
             
             self.bestx_left = aver_x_left
             self.bestx_right = aver_x_right
-            self.best_fit_left = left_fit  
-            self.best_fit_right = right_fit
+            self.best_fit_left = np.mean(average_fit_left,axis=0)  
+            self.best_fit_right = np.mean(average_fit_right,axis=0)
+            #self.best_fit_left = left_fit  
+            #self.best_fit_right = right_fit
     
     # To find line pixels based on current fit coefficients when have
     # a new warped binary image from the next frame of video 
@@ -129,7 +135,7 @@ class Line():
         nonzero = binary_warped.nonzero()
         nonzeroy = np.array(nonzero[0])
         nonzerox = np.array(nonzero[1])
-        margin = 100
+        margin = 40
         left_lane_inds = ((nonzerox > (left_fit[0]*(nonzeroy**2) + left_fit[1]*nonzeroy + left_fit[2] - margin)) & (nonzerox < (left_fit[0]*(nonzeroy**2) + left_fit[1]*nonzeroy + left_fit[2] + margin))) 
         right_lane_inds = ((nonzerox > (right_fit[0]*(nonzeroy**2) + right_fit[1]*nonzeroy + right_fit[2] - margin)) & (nonzerox < (right_fit[0]*(nonzeroy**2) + right_fit[1]*nonzeroy + right_fit[2] + margin)))  
         
@@ -140,34 +146,44 @@ class Line():
         righty = nonzeroy[right_lane_inds]
 
         # Fit a second order polynomial to each
-        left_fit = np.polyfit(lefty, leftx, 2)
-        right_fit = np.polyfit(righty, rightx, 2)
-        # Generate x and y values for plotting
-        ploty = np.linspace(0, binary_warped.shape[0]-1, binary_warped.shape[0] )
-        left_fitx = left_fit[0]*ploty**2 + left_fit[1]*ploty + left_fit[2]
-        right_fitx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2]
+        if (leftx != [] and righty != []):
+            left_fit = np.polyfit(lefty, leftx, 2)
+            right_fit = np.polyfit(righty, rightx, 2)
+            
+            # Generate x and y values for plotting
+            ploty = np.linspace(0, binary_warped.shape[0]-1, binary_warped.shape[0] )
+            left_fitx = left_fit[0]*ploty**2 + left_fit[1]*ploty + left_fit[2]
+            right_fitx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2]
+            
+            # append to current measurments and fit coefficients       
+            self.allx_left.append(leftx[:,None])
+            self.allx_right.append(rightx[:,None])
+            
+            self.ally_left.append(lefty[:,None])
+            self.ally_right.append(righty[:,None])
+            
+            self.current_fit_left.append(left_fit[:,None])
+            self.current_fit_right.append(right_fit[:,None])
+            
+            self.current_xfit_left.append(left_fitx[:,None])  
+            self.current_xfit_right.append(right_fitx[:,None])
+            
+            ym_per_pix = 30/720
+            xm_per_pix = 3.7/700
+            self.meas_cur(ploty,left_fit,left_fitx,right_fit,right_fitx,ym_per_pix,xm_per_pix)
+            
+            # The offset of the center of the image from the left lane
+            offset = (binary_warped.shape[0] / 2 - leftx[0]) * xm_per_pix
+            self.line_base_pos.append(offset)
+            
+            self.sanity_check()
+        else:
+            self.detected = False
+            self.__n.append(1)
+
+            # converting pixel values to real world space
         
-        # append to current measurments and fit coefficients       
-        self.allx_left.append(leftx[:,None])
-        self.allx_right.append(rightx[:,None])
-        
-        self.ally_left.append(lefty[:,None])
-        self.ally_right.append(righty[:,None])
-        
-        self.current_fit_left.append(left_fit[:,None])
-        self.current_fit_right.append(right_fit[:,None])
-        
-        self.current_xfit_left.append(left_fitx[:,None])  
-        self.current_xfit_right.append(right_fitx[:,None])
-        
-        # converting pixel values to real world space
-        ym_per_pix = 30/720
-        xm_per_pix = 3.7/700
-        self.meas_cur(ploty,left_fit,left_fitx,right_fit,right_fitx,ym_per_pix,xm_per_pix)
-        
-        # The offset of the center of the image from the left lane
-        offset = (binary_warped.shape[0] / 2 - leftx[0]) * xm_per_pix
-        self.line_base_pos.append(offset)
+            
         
     # calculate radius of curvature
     def meas_cur(self,ploty,left_fit,leftx,right_fit,rightx,ym_per_pix=30/720,xm_per_pix=3.7/700):
@@ -184,10 +200,12 @@ class Line():
         #right_curverad = ((1 + (2*right_fit_cr[0]*y_eval*ym_per_pix + right_fit_cr[1])**2)**1.5) / np.absolute(2*right_fit_cr[0])
         left_curverad = ((1 + (2*left_fit_cr[0]*ploty*ym_per_pix + left_fit_cr[1])**2)**1.5) / np.absolute(2*left_fit_cr[0])
         right_curverad = ((1 + (2*right_fit_cr[0]*ploty*ym_per_pix + right_fit_cr[1])**2)**1.5) / np.absolute(2*right_fit_cr[0])
+       
         # Now our radius of curvature is in meters
         self.radius_of_curvature_left.append(left_curverad[:,None])
         self.radius_of_curvature_right.append(right_curverad[:,None])
-        
+    
+    # Find lane line from scratch
     def find_lines(self,binary_warped):
         # Take a histogram of the bottom half of the image
         histogram = np.sum(binary_warped[int(binary_warped.shape[0]/2):,:], axis=0)
@@ -211,7 +229,7 @@ class Line():
         leftx_current = leftx_base
         rightx_current = rightx_base
         # Set the width of the windows +/- margin
-        margin = 100
+        margin = 40
         # Set minimum number of pixels found to recenter window
         minpix = 50
         # Create empty lists to receive left and right lane pixel indices
@@ -251,33 +269,41 @@ class Line():
         lefty = nonzeroy[left_lane_inds] 
         rightx = nonzerox[right_lane_inds]
         righty = nonzeroy[right_lane_inds] 
-    
-        # Fit a second order polynomial to each
-        left_fit = np.polyfit(lefty, leftx, 2)
-        right_fit = np.polyfit(righty, rightx, 2)
-        # Generate x and y values for plotting
-        ploty = np.linspace(0, binary_warped.shape[0]-1, binary_warped.shape[0] )
-        left_fitx = left_fit[0]*ploty**2 + left_fit[1]*ploty + left_fit[2]
-        right_fitx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2]
+        print("-----",leftx)
         
-        self.allx_left.append(leftx[:,None])
-        self.allx_right.append(rightx[:,None])
+        if  (leftx != [] and righty != []):
+            # Fit a second order polynomial to each
+            left_fit = np.polyfit(lefty, leftx, 2)
+            right_fit = np.polyfit(righty, rightx, 2)
+            # Generate x and y values for plotting
+            ploty = np.linspace(0, binary_warped.shape[0]-1, binary_warped.shape[0] )
+            left_fitx = left_fit[0]*ploty**2 + left_fit[1]*ploty + left_fit[2]
+            right_fitx = right_fit[0]*ploty**2 + right_fit[1]*ploty + right_fit[2]
+            
+            self.allx_left.append(leftx[:,None])
+            self.allx_right.append(rightx[:,None])
+            
+            
+            self.ally_left.append(lefty[:,None])
+            self.ally_right.append(righty[:,None])
+            
+            self.current_fit_left.append(left_fit[:,None])
+            self.current_fit_right.append(right_fit[:,None])
+            
+            self.current_xfit_left.append(left_fitx[:,None])  
+            self.current_xfit_right.append(right_fitx[:,None])
         
-        
-        self.ally_left.append(lefty[:,None])
-        self.ally_right.append(righty[:,None])
-        
-        self.current_fit_left.append(left_fit[:,None])
-        self.current_fit_right.append(right_fit[:,None])
-        
-        self.current_xfit_left.append(left_fitx[:,None])  
-        self.current_xfit_right.append(right_fitx[:,None])
-    
-        ym_per_pix = 30/720
-        xm_per_pix = 3.7/700
-        self.meas_cur(ploty,left_fit,left_fitx,right_fit,right_fitx,ym_per_pix,xm_per_pix)
-        offset = (binary_warped.shape[1] / 2 - (left_fitx[-1] + right_fitx[-1]) / 2) * xm_per_pix        
-        self.line_base_pos.append(offset)
+            ym_per_pix = 30/720
+            xm_per_pix = 3.7/700
+            self.meas_cur(ploty,left_fit,left_fitx,right_fit,right_fitx,ym_per_pix,xm_per_pix)
+            offset = (binary_warped.shape[1] / 2 - (left_fitx[-1] + right_fitx[-1]) / 2) * xm_per_pix        
+            self.line_base_pos.append(offset)
+            
+            self.sanity_check()
+        else:
+            self.detected = False
+            self.__n.append(1)
+
     
     # Project the measurement back down onto the road     
     def draw_back(self,warped,perspective_M):
@@ -319,8 +345,8 @@ class Line():
         # For source points I'm grabbing the outer four detected corners
         src = np.float32([[(img_size[0] / 2) - 55, img_size[1] / 2 + 100],\
             [((img_size[0] / 6) - 10), img_size[1]],\
-            [(img_size[0] * 5 / 6) + 60, img_size[1]],\
-            [(img_size[0] / 2 + 55), img_size[1] / 2 + 100]])
+            [(img_size[0] * 5 / 6) + 55, img_size[1]],\
+            [(img_size[0] / 2 + 60), img_size[1] / 2 + 100]])
         
         dst = np.float32([[(img_size[0] / 4), 0],\
             [(img_size[0] / 4), img_size[1]],\
@@ -329,19 +355,11 @@ class Line():
         
         top_down, perspective_M = infu.persp_trans(image, src, dst, self.mtx, self.dist)   
         
-        _,binary_warped = infu.color_thresholding(top_down, s_thresh=(30, 255), sx_thresh=(70, 100))
-        ksize =3
-        gradx = infu.abs_sobel_thresh(top_down, orient='x', sobel_kernel=ksize, thresh=(20, 255))
-        mag_binary = infu.mag_thresh(top_down, sobel_kernel=ksize, mag_thresh=(30, 255))
-    
-        combined = np.zeros_like(mag_binary)
-        #combined[((gradx == 1) & (grady == 1)) | ((mag_binary == 1) & (dir_binary == 1))|(binary_warped == 1)] = 1
-        combined[((gradx == 1) & (binary_warped == 1)) & (mag_binary == 1)] = 1
-        
+        _,binary_warped = infu.color_thresholding(top_down, s_thresh=(50, 255), sx_thresh=(30, 100),sobel_kernel=3)
+  
         if (self.best_fit_left.T == [np.array([False,False,False])]).any() or \
                 (self.best_fit_right.T == [np.array([False,False,False])]).any():
             self.find_lines(binary_warped)
-            self.sanity_check()
             # smothing and set self.bestx ,self.best_fit
             if self.detected:
                 self.bestx_left = self.allx_left[-1]
@@ -351,7 +369,6 @@ class Line():
                 #print("****", self.best_fit_left)
         else:
             self.look_ahead_Filter(binary_warped)
-            self.sanity_check()
             # smothing and set self.bestx ,self.best_fit
             self.smoothing()
        
@@ -361,7 +378,7 @@ class Line():
         
         
         font = cv2.FONT_HERSHEY_SIMPLEX
-        print(self.line_base_pos[-1])
+        print('----',self.line_base_pos[-1])
         cv2.putText(result,'Radius of Curvature = ' +\
                     round(self.radius_of_curvature_left[-1][-1][0],4).astype('str')\
                     +'(m)',(200,100), font, 1.5,(255,255,255),2,cv2.LINE_AA)
@@ -378,14 +395,6 @@ dist = dist_pickle["dist"]
 line_detected = Line(mtx,dist)
 white_output = 'project_video.mp4'
 
-'''image = mpimg.imread('./examples/calibration_wide/test_undist.jpg')
-result = line_detected.lane_finding(image)     
-f, (ax1, ax2) = plt.subplots(2, 1, figsize=(32, 12))
-#f.tight_layout()
-ax1.imshow(image)
-ax1.set_title('Original Image', fontsize=20)
-#ax2.imshow(binary_warped, cmap='gray')
-ax2.imshow(result)'''
 clip1 = VideoFileClip(white_output)
 lane_clip = clip1.fl_image(line_detected.lane_finding)
 lane_clip.write_videofile("./new_project_video.mp4")
